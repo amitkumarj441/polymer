@@ -129,6 +129,18 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
       }
     }
   </style>
+
+  <style is="custom-style">
+  :root[foo="bar"] {
+    --foo: 10px dotted red;
+  }
+  html {
+    --html: 10px dotted yellow;
+  }
+  html[foo="bar"] {
+    --html-foo: 10px dotted green;
+  }
+  </style>
 </head>
 <body>
   <div class="italic">italic</div>
@@ -259,6 +271,7 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
           --variable-assignment-before-property: 7px; padding-bottom: var(--variable-property-after-assignment);
           padding-left: var(--variable-property-before-assignment);--variable-assignment-after-property: 8px;
           top: 12px;--variable-from-other-variable: var(--variable-into-first-variable);--variable-from-another-variable: var(--variable-into-second-variable); --variable-from-last-variable: var(--variable-into-third-variable);
+          height: 20px;
         }
       </style>
       <child-of-child-with-var id="child"></child-of-child-with-var>
@@ -282,33 +295,73 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
     </template>
   </dom-module>
 
+  <dom-module id="x-top-selectors">
+    <template>
+      <style>
+      #foo {
+        border: var(--foo);
+      }
+      #html {
+        border: var(--html);
+      }
+      #htmlFoo {
+        border: var(--html-foo);
+      }
+      </style>
+      <div id="foo"></div>
+      <div id="html"></div>
+      <div id="htmlFoo"></div>
+    </template>
+  </dom-module>
+
+  <script>
+  HTMLImports.whenReady(function() {
+    Polymer({
+      is: 'x-baz'
+    });
+
+    Polymer({
+      is: 'x-bar'
+    });
+
+    Polymer({
+      is: 'x-foo'
+    });
+
+    Polymer({
+      is: 'x-red-text'
+    });
+
+    Polymer({
+      is: 'x-blue-bold-text'
+    });
+    Polymer({
+      is: 'x-top-selectors'
+    });
+  })
+  </script>
+
+  <style is="custom-style">
+    .order {
+      @apply --order-mixin;
+    }
+    :root {
+      --order-mixin: {
+        border: 2px solid black;
+      };
+    }
+  </style>
+  <div class="order"></div>
+
   <script>
 
     suite('custom-style', function() {
 
-      var xBar, xFoo;
+      var xBar, xFoo, stylesBuilt;
 
       suiteSetup(function() {
-
-        Polymer({
-          is: 'x-baz'
-        });
-
-        Polymer({
-          is: 'x-bar'
-        });
-
-        Polymer({
-          is: 'x-foo'
-        });
-
-        Polymer({
-          is: 'x-red-text'
-        });
-
-        Polymer({
-          is: 'x-blue-bold-text'
-        });
+        var customStyle = document.querySelector('style[is="custom-style"]');
+        stylesBuilt = Polymer.StyleUtil.getCssBuildType(customStyle);
 
         xBar = document.querySelector('x-bar');
         xFoo = document.querySelector('x-foo');
@@ -334,9 +387,24 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
       });
 
       test('custom properties registered as defaults', function() {
-        var props = Polymer.StyleDefaults._styleProperties;
-        assert.property(props, '--italic');
-        assert.property(props, '--bag');
+        var propsToCheck = ['--italic'];
+        if (Polymer.Settings.useNativeCSSProperties || stylesBuilt) {
+          var sep = Polymer.ApplyShim._separator;
+          propsToCheck.push('--bag' + sep + 'margin', '--bag' + sep + 'border');
+        } else {
+          propsToCheck.push('--bag');
+        }
+        if (Polymer.Settings.useNativeCSSProperties) {
+          var cs = getComputedStyle(document.documentElement);
+          propsToCheck.forEach(function(p) {
+            assert.ok(cs.getPropertyValue(p));
+          });
+        } else {
+          var props = Polymer.StyleDefaults._styleProperties;
+          propsToCheck.forEach(function(p) {
+            assert.property(props, p);
+          });
+        }
       });
 
       test('custom properties with space before semicolon', function() {
@@ -356,13 +424,17 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
       test('custom-styles apply normal and property values to main document', function() {
         var bag = document.querySelector('.bag');
         var italic = document.querySelector('.italic');
-        assertComputed(document.body, '10px', 'margin-top');
         assertComputed(bag, '1px');
         assertComputed(italic, 'italic', 'font-style');
       });
 
       test('imported custom-styles apply', function() {
-        assertComputed(document.body, '10px', 'padding-top');
+        if (stylesBuilt && !Polymer.Settings.useNativeCSSProperties) {
+          // css build will test this by using vulcanize.
+          // this inlines the custom-style after the consumption point, and changes the timing for custom property shim
+          // Force an update style for this weird corner case in the tests
+          Polymer.updateStyles();
+        }
         var v = document.querySelector('.import-var');
         var m = document.querySelector('.import-mixin');
         assertComputed(v, '3px');
@@ -388,10 +460,6 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
       test('custom-styles apply to pseudo elements', function() {
         var e = document.querySelector('#after');
         assertComputed(e, '11px', null, '::after');
-      });
-
-      test('@apply in :root rule that also defines properties', function() {
-        assertComputed(document.body, '12px');
       });
 
       test('style paths in included dom-modules loaded in import', function() {
@@ -492,6 +560,43 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
         assertComputed(document.querySelector('.foo--bar'), '20px');
       });
 
+      test('mixin definition and usage is ordering independant in a custom-style',
+        function() {
+          var el = document.querySelector('div.order');
+          assertComputed(el, '2px');
+        }
+      );
+
+      suite('top-level selectors', function() {
+        var el;
+        function activateSelectors() {
+          document.documentElement.setAttribute('foo', 'bar');
+          CustomElements.takeRecords();
+          Polymer.updateStyles();
+        }
+        suiteSetup(function() {
+          el = document.createElement('x-top-selectors');
+          document.body.appendChild(el);
+        });
+        teardown(function() {
+          document.documentElement.removeAttribute('foo');
+          CustomElements.takeRecords();
+          Polymer.updateStyles();
+        });
+        test(':root...', function() {
+          assertComputed(el.$.foo, '0px');
+          activateSelectors();
+          assertComputed(el.$.foo, '10px');
+        });
+        test('html', function() {
+          assertComputed(el.$.html, '10px');
+        });
+        test('html...', function() {
+          assertComputed(el.$.htmlFoo, '0px');
+          activateSelectors();
+          assertComputed(el.$.htmlFoo, '10px');
+        });
+      });
     });
 
 

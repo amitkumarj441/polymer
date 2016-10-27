@@ -7,11 +7,10 @@ The complete set of contributors may be found at http://polymer.github.io/CONTRI
 Code distributed by Google as part of the polymer project is also
 subject to an additional IP rights grant found at http://polymer.github.io/PATENTS.txt
 -->
+<link rel="import" href="../path.html">
 <script>
 
   Polymer.Bind = {
-
-    _dataEventCache: {},
 
     // for prototypes (usually)
     prepareModel: function(model) {
@@ -72,20 +71,22 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
         var effects = node._propertyEffects && node._propertyEffects[property];
         if (effects) {
           node._propertySetter(property, value, effects, quiet);
-        } else {
+        } else if (node[property] !== value) {
           node[property] = value;
         }
       },
 
       _effectEffects: function(property, value, effects, old, fromAbove) {
         for (var i=0, l=effects.length, fx; (i<l) && (fx=effects[i]); i++) {
-          fx.fn.call(this, property, value, fx.effect, old, fromAbove);
+          // always send latest value for property
+          // if any previous effect has modified the value, given `value` will be stale
+          fx.fn.call(this, property, this[property], fx.effect, old, fromAbove);
         }
       },
 
       _clearPath: function(path) {
         for (var prop in this.__data__) {
-          if (prop.indexOf(path + '.') === 0) {
+          if (Polymer.Path.isDescendant(path, prop)) {
             this.__data__[prop] = undefined;
           }
         }
@@ -194,7 +195,7 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
         model._bindListeners = [];
       }
       var fn = this._notedListenerFactory(property, path,
-        this._isStructured(path), negated);
+        Polymer.Path.isDeep(path), negated);
       var eventName = event ||
         (Polymer.CaseMap.camelToDashCase(property) + '-changed');
       model._bindListeners.push({
@@ -206,10 +207,6 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
       });
     },
 
-    _isStructured: function(path) {
-      return path.indexOf('.') > 0;
-    },
-
     _isEventBogus: function(e, target) {
       return e.path && e.path[0] !== target;
     },
@@ -217,7 +214,8 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
     _notedListenerFactory: function(property, path, isStructured, negated) {
       return function(target, value, targetPath) {
         if (targetPath) {
-          this._notifyPath(this._fixPath(path, property, targetPath), value);
+          var newPath = Polymer.Path.translate(property, path, targetPath);
+          this._notifyPath(newPath, value);
         } else {
           // TODO(sorvell): even though we have a `value` argument, we *must*
           // lookup the current value of the property. Multiple listeners and
